@@ -216,9 +216,9 @@ def extract_je_data(fname):
 
 if __name__ == "__main__":
 
-    je_fnames = ['200730_enc-gaussFilter-noAP-2s.csv',
-                 '200730_enc-gaussFilter-noAP-4s.csv',
-                 '200730_enc-gaussFilter-noAP-6s.csv']
+    je_fnames = ['je_data/200730_enc-gaussFilter-noAP-2s.csv',
+                 'je_data/200730_enc-gaussFilter-noAP-4s.csv',
+                 'je_data/200730_enc-gaussFilter-noAP-6s.csv']
 
     je_data = []
     for fname in je_fnames:
