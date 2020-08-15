@@ -11,34 +11,31 @@ import csv
 # Large-Area SiPM Noise Model
 class LASIPM_NM:
 
-    # CONSTANTS
-    NS = 100000
-    TS = 2.5e-10
+    # CONSTANTS - used for computation of ballistic deficit
+    NS = 100000     # Number of samples
+    TS = 2.5e-10    # Time step between samples (the smaller the number, the more accurate the BD)
     
     # PHYSICS CONSTANTS
     k = 1.38e-23 # Boltzmann constant
     q = 1.6e-19  # Unit charge
 
     def __init__(self, TP, T, P, S, qspe=360e-15, cj=8.7e-9, rq=12, cq=330e-12, ic=393e-6, re=22, rbb=8, ib=2*200e-6, rp=380.8):
-        self.TP = TP
+        self.TP = TP        # An array w/ peaking times for which the ENC is to be evalueated
 
-        self.P = P
-        self.S = S
+        self.P = P          # Number of SiPMs in parallel
+        self.S = S          # Number of SiPMs in series
         
-        self.T = T
+        self.T = T          # Measurement temperature
         self.vt = self.k*T/self.q
 
-        self.qspe = qspe/S
+        self.qspe = qspe/S  # Single-photo-electron charge
 
-        self.cj = cj*(P/S)
-        self.cq = cq*(P/S)
-        self.rq = rq*(S/P)
+        self.cj = cj*(P/S)  # Junction capacitance
+        self.cq = cq*(P/S)  # Quenching capacitance
+        self.rq = rq*(S/P)  # Quenching resistance
 
-        # Emitter resistance
-        self.re = re
-
-        # Input transistor base resistance
-        self.rbb = rbb
+        self.re = re        # Resistance at the emmiter node of the input transistor
+        self.rbb = rbb      # Input-transistor base resistance
 
         # Compute noise power spectral densities for parallel and series noise sources
         # Parallel noise. Includes: The shot noise from transistors and 
@@ -107,7 +104,7 @@ class LASIPM_NM:
         print('\n')
         return enc_spe, enc_pn_spe, enc_sn_spe, enc_snrq_spe
 
-    
+    # Back-of-envelope ENC calculation
     def formula_enc(self, aw=1, ap=1/3):
     
         enc_pn = []
@@ -145,7 +142,7 @@ class LASIPM_NM:
                 
         return X, sig
 
-    # Generates Triangular weighting function w/ a certain peaking time
+    # Generates Triangular weighting function w/ a given peaking time
     def gen_triang_wf(self, tp):
 
         X = [ (x+1)*self.TS for x in range(-int(np.floor(self.NS/2)), int(np.floor(self.NS/2)))]
@@ -197,7 +194,6 @@ class LASIPM_NM:
 def extract_je_data(fname):
     csvdata = csv.reader(open(fname, 'r'), delimiter=',')
     # Skip first row
-    #csvdata = next(csvdata)
     next(csvdata)
     
     data = []
