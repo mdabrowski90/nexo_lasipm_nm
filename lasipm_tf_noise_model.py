@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 
 import csv
 
+from mdplt import MDPLT
+
 # Large-Area SiPM Noise Model
 class LASIPM_NM:
 
@@ -19,7 +21,7 @@ class LASIPM_NM:
     k = 1.38e-23 # Boltzmann constant
     q = 1.6e-19  # Unit charge
 
-    def __init__(self, TP, T, P, S, qspe=360e-15, cj=8.7e-9, rq=12, cq=330e-12, ic=393e-6, re=22, rbb=8, ib=2*200e-6, rp=380.8):
+    def __init__(self, TP, T, P, S, qspe=360e-15, cj=8.7e-9, rq=12, cq=330e-12, ic=393e-6, re=22, rbb=8, ib=2*200e-6, rp=380.8, XF = np.linspace(1, 10e9, 100000)):
         self.TP = TP        # An array w/ peaking times for which the ENC is to be evalueated
 
         self.P = P          # Number of SiPMs in parallel
@@ -43,6 +45,9 @@ class LASIPM_NM:
         self.vs_dn2 = 2*self.k*self.T*self.vt/ic + 4*self.k*self.T*self.re + 4*self.k*self.T*self.rbb
         self.vsrq_dn2 = 4*self.k*self.T*self.rq
 
+        # Define integration region in F
+        self.XF = XF
+
         # Switches
         self.INCL_SIPM_ZIN = True
         self.BALLISTIC_DEFICIT = True
@@ -61,11 +66,40 @@ class LASIPM_NM:
             return (2*np.pi*f*self.cj)**2 * 1/(1+ (2*np.pi*f*self.rq*(self.cq+self.cj))**2)
         else:
             return (2*np.pi*f*self.cj)**2
-    
-    def compute_enc(self):
-        # Specification of limits for integration in frequency
-        xf = np.logspace(0, 12, 12*1000)
 
+    def get_pn_in_f(self, tp=1e-6, no_filter=False, f0_f1=[1e7, 1e8]):
+        # f0_f1 - Post Amplifier's poles - to remove it's influence set the poles to very high frequency
+        post_a_f = lambda f: 1/np.sqrt((1+ (f/f0_f1[0])**2))/np.sqrt((1+ (f/f0_f1[1])**2))
+        if no_filter:
+            return [ np.sqrt( self.ip_dn2 )*post_a_f(f) for f in self.XF ]
+        else:
+            # For normalization purposes, the signal must be scaled by 1/tp
+            return [ 1/tp* np.sqrt( self.ip_dn2 * self.abs_sq_sig_tf(f, tp) ) *post_a_f(f)  for f in self.XF ]
+
+    def get_sn_in_f(self, tp=1e-6, no_filter=False, f0_f1=[1e7, 1e8]):
+        # f0_f1 - Post Amplifier's poles - to remove it's influence set the poles to very high frequency
+        post_a_f = lambda f: 1/np.sqrt((1+ (f/f0_f1[0])**2))/np.sqrt((1+ (f/f0_f1[1])**2))
+        if no_filter:
+            return [ np.sqrt( self.vs_dn2 * self.abs_sq_sn_tf(f) )* post_a_f(f) for f in self.XF ]
+        else:
+            # For normalization purposes, the signal must be scaled by 1/tp
+            return [ 1/tp* np.sqrt( self.vs_dn2 * self.abs_sq_sig_tf(f, tp) *  self.abs_sq_sn_tf(f) * post_a_f(f) ) for f in self.XF ]
+
+    def get_sn_rq_in_f(self, tp=1e-6, no_filter=False, f0_f1=[1e7, 1e8]):
+        # f0_f1 - Post Amplifier's poles - to remove it's influence set the poles to very high frequency
+        post_a_f = lambda f: 1/np.sqrt((1+ (f/f0_f1[0])**2))/np.sqrt((1+ (f/f0_f1[1])**2))
+        if no_filter:
+            return [ np.sqrt( self.vsrq_dn2 *  self.abs_sq_snrq_tf(f) ) * post_a_f(f) for f in self.XF ]
+        else:
+            # For normalization purposes, the signal must be scaled by 1/tp
+            return [ 1/tp* np.sqrt( self.vsrq_dn2 * self.abs_sq_sig_tf(f, tp) *  self.abs_sq_snrq_tf(f) ) * post_a_f(f) for f in self.XF ]
+
+    def get_pn_sn_in_f(self, tp=1e-6, no_filter=False, f0_f1=[1e7, 1e8]):
+        sn_in_f = self.get_sn_in_f(tp, no_filter, f0_f1)
+        pn_in_f = self.get_pn_in_f(tp, no_filter, f0_f1)
+        return [ np.sqrt(sn_in_f[i]**2 + pn_in_f[i]**2 ) for i in range(0,len(sn_in_f))]
+            
+    def compute_enc(self):
         enc_pn_spe = []
         enc_sn_spe = []
         enc_snrq_spe = []
@@ -79,14 +113,14 @@ class LASIPM_NM:
             ypt_sn = []
             ypt_snrq = []
             
-            for f in xf:
+            for f in self.XF:
                 ypt_pn.append( self.ip_dn2 * self.abs_sq_sig_tf(f, tp) )
                 ypt_sn.append( self.vs_dn2 * self.abs_sq_sig_tf(f, tp) *  self.abs_sq_sn_tf(f) )
                 ypt_snrq.append( self.vsrq_dn2 * self.abs_sq_sig_tf(f, tp) *  self.abs_sq_snrq_tf(f) )
                 
-            enc_pn_spe_   = np.sqrt( np.trapz(ypt_pn, xf) ) / self.qspe
-            enc_sn_spe_   = np.sqrt( np.trapz(ypt_sn, xf) ) / self.qspe
-            enc_snrq_spe_ = np.sqrt( np.trapz(ypt_snrq, xf) ) / self.qspe
+            enc_pn_spe_   = np.sqrt( np.trapz(ypt_pn, self.XF) ) / self.qspe
+            enc_sn_spe_   = np.sqrt( np.trapz(ypt_sn, self.XF) ) / self.qspe
+            enc_snrq_spe_ = np.sqrt( np.trapz(ypt_snrq, self.XF) ) / self.qspe
             
             if self.BALLISTIC_DEFICIT:
                 enc_pn_spe_   = enc_pn_spe_ / self.ballistic_deficit(tp)
@@ -212,9 +246,9 @@ def extract_je_data(fname):
 
 if __name__ == "__main__":
 
-    je_fnames = ['je_data/200730_enc-gaussFilter-noAP-2s.csv',
-                 'je_data/200730_enc-gaussFilter-noAP-4s.csv',
-                 'je_data/200730_enc-gaussFilter-noAP-6s.csv']
+    je_fnames = ['je_data/200820_enc-triangFilter-2s.csv',
+                 'je_data/200820_enc-triangFilter-4s.csv',
+                 'je_data/200820_enc-triangFilter-6s.csv']
 
     je_data = []
     for fname in je_fnames:
@@ -223,43 +257,48 @@ if __name__ == "__main__":
     # Step 0: CREATE ARRAY WITH PEAKING TIMES (TP)
     TP = np.logspace(-8, -5, 16)
 
+    # (optional) CREATE ARRAY WITH FREQUENCY SPECTRUM OVER WHICH THE NOISE IS INTEGRTATED (default one can be found in __init__() of LASIPM_NM )
+    XF = np.linspace(1, 1e9, 100000)
+
     # STEP1: CREATE OBJECT WITH CORRECT SiPM ARRANGEMENT
-    lasipm_nm_2s = LASIPM_NM(TP, 168, 1, 2)
-    lasipm_nm_2p2s = LASIPM_NM(TP, 168, 2, 2)
-    lasipm_nm_3p2s = LASIPM_NM(TP, 168, 3, 2)
+    lasipm_nm_2s = LASIPM_NM(TP, 168, 1, 2, rp=50, XF=XF)
+    lasipm_nm_2p2s = LASIPM_NM(TP, 168, 2, 2, rp=50, XF=XF)
+    lasipm_nm_3p2s = LASIPM_NM(TP, 168, 3, 2, rp=50, XF=XF)
+    lasipm_nm_6p = LASIPM_NM(TP, 168, 6, 1, rp=50, XF=XF)
 
     # STEP2: RUN OBJECT'S METHOD: compute_enc(), WHICH RETURNS ENC ARRAY
     enc_2s = lasipm_nm_2s.compute_enc()
     enc_2p2s = lasipm_nm_2p2s.compute_enc()
     enc_3p2s = lasipm_nm_3p2s.compute_enc()
 
-    # STEP3: PLOT DATA
+    # PLOTTING NOISE SPECTRUMS
+
+    # To observe how spectrum should look like with only a capacitance at the input (instead of a real SiPM):
+    # (1) Create an object with S=1, P = 1 and cj = (desired capacitance value) and cq = 1 fF
+    lasipm_nm_4p7 = LASIPM_NM(TP, 168, 1, 1, cj=4.7e-9, cq=1e-15, rp=50, XF=XF) # Example with 4.7 nF
+    lasipm_nm_12 = LASIPM_NM(TP, 168, 1, 1, cj=12e-9, cq=1e-15, rp=50, XF=XF) # Example with 12 nF
+    
+    # (2) Turn off the SiPM option
+    lasipm_nm_4p7.INCL_SIPM_ZIN = False
+    lasipm_nm_12.INCL_SIPM_ZIN = False
+    
+    # (3) Plot noise spectrums using get_pn_in_f(), get_sn_in_f() and get_pn_sn_in_f() functions
+    # (optional) To apply triangular filtering: set no_filter=False while providing an appropriate peaking time
+    # To modify poles of the post-amplifier set f0_f1=[pole0, pole1]
     plt.ion()
     plt.figure()
-    plt.title('ENC in Tp for 2s')
-    plt.plot(je_data[0][0], je_data[0][1], '-o', markersize=2, label='Measured data - Gaussian Filter')
-    plt.plot(TP, enc_2s[0], '-o', markersize=1.25, label='Noise model - Triangular Filter')
-    plt.yscale('log')
+    plt.plot(XF, lasipm_nm_4p7.get_pn_in_f(no_filter=True, f0_f1=[5e6, 2e7]), label='Parallel noise spectrum - 4.7 nF')
+    plt.plot(XF, lasipm_nm_4p7.get_sn_in_f(no_filter=True, f0_f1=[5e6, 2e7]), label='Series noise spectrum - 4.7 nF')
+    plt.plot(XF, lasipm_nm_4p7.get_pn_sn_in_f(no_filter=True, f0_f1=[5e6, 2e7]), label='Parallel+Series noise spectrum - 4.7 nF')
+    plt.plot(XF, lasipm_nm_12.get_pn_in_f(no_filter=True, f0_f1=[5e6, 2e7]), label='Parallel noise spectrum - 12 nF')
+    plt.plot(XF, lasipm_nm_12.get_sn_in_f(no_filter=True, f0_f1=[5e6, 2e7]), label='Series noise spectrum - 12 nF')
+    plt.plot(XF, lasipm_nm_12.get_pn_sn_in_f(no_filter=True, f0_f1=[5e6, 2e7]), label='Parallel+Series noise spectrum - 12 nF')
+    plt.legend(frameon=False, loc='lower right')
     plt.xscale('log')
-    plt.legend(frameon=False, loc='upper right')
+    plt.yscale('log')
     plt.draw()
 
-    plt.figure()
-    plt.title('ENC in Tp for 2p2s')
-    plt.plot(je_data[1][0], je_data[1][1], '-o', markersize=2, label='Measured data - Gaussian Filter')
-    plt.plot(TP, enc_2p2s[0], '-o', markersize=1.25, label='Noise model - Triangular Filter')
-    plt.yscale('log')
-    plt.xscale('log')
-    plt.legend(frameon=False, loc='upper right')
-    plt.draw()
-
-    plt.figure()
-    plt.title('ENC in Tp for 3p2s')
-    plt.plot(je_data[2][0], je_data[2][1], '-o', markersize=2, label='Measured data - Gaussian Filter')
-    plt.plot(TP, enc_3p2s[0], '-o', markersize=1.25, label='Noise model - Triangular Filter')
-    plt.yscale('log')
-    plt.xscale('log')
-    plt.legend(frameon=False, loc='upper right')
-    plt.draw()
-    
     input('Press [ENTER] to finish.')
+    exit(0)
+
+
