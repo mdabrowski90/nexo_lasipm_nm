@@ -54,7 +54,7 @@ class LASIPM_NM:
         
         # Define integration region in F
         self.XF = XF
-
+        
         # Switches
         self.INCL_SIPM_ZIN = True
         self.FILTER_SIGNAL = True
